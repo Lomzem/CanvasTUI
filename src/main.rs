@@ -1,8 +1,9 @@
+mod fetch;
 mod tui;
 
 use std::time::Duration;
 
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{Local, NaiveDate};
 use crossterm::event::KeyCode::Char;
 
 use color_eyre::eyre::Result;
@@ -19,24 +20,7 @@ use ratatui::{
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tui::Event;
 
-struct Calendar {
-    pub dates: Vec<CalendarDate>,
-    pub current_date_index: usize,
-}
-
-struct CalendarDate {
-    pub date: NaiveDate,
-    pub events: Vec<CalendarEvent>,
-    pub table_state: TableState,
-}
-
-struct CalendarEvent {
-    pub course_name: String,
-    pub due_at: DateTime<Local>,
-    pub title: String,
-    pub html_url: String,
-    pub submitted: bool,
-}
+use crate::fetch::{Calendar, CalendarDate, CalendarEvent, fetch};
 
 struct App {
     calendar: Calendar,
@@ -90,9 +74,17 @@ impl Widget for &mut App {
             Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
 
         let current_date = &mut self.calendar.dates[self.calendar.current_date_index];
-        Paragraph::new(current_date.date.format("%A %b %-d").to_string())
-            .style(Style::default().fg(Color::Magenta).bold())
-            .render(date_area, buf);
+        Paragraph::new(
+            current_date
+                .events
+                .first()
+                .unwrap()
+                .due_at
+                .format("%A %b %-d")
+                .to_string(),
+        )
+        .style(Style::default().fg(Color::Magenta).bold())
+        .render(date_area, buf);
 
         let header = ["Course", "Assignment", "Due"]
             .into_iter()
@@ -169,48 +161,6 @@ fn update(app: &mut App, action: Action) {
     match action {
         Action::Quit => app.should_quit = true,
         Action::FetchComplete(data) => {
-            app.calendar.dates = vec![
-                CalendarDate {
-                    date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-                    events: vec![
-                        CalendarEvent {
-                            course_name: "foo".to_string(),
-                            due_at: Local::now(),
-                            title: "foo".to_string(),
-                            html_url: "https://google.com".to_string(),
-                            submitted: false,
-                        },
-                        CalendarEvent {
-                            course_name: "foo2".to_string(),
-                            due_at: Local::now(),
-                            title: "foo2".to_string(),
-                            html_url: "https://google.com".to_string(),
-                            submitted: true,
-                        },
-                    ],
-                    table_state: TableState::default().with_selected(Some(0)),
-                },
-                CalendarDate {
-                    date: NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
-                    events: vec![
-                        CalendarEvent {
-                            course_name: "foo".to_string(),
-                            due_at: Local::now(),
-                            title: "foo3".to_string(),
-                            html_url: "https://google.com".to_string(),
-                            submitted: false,
-                        },
-                        CalendarEvent {
-                            course_name: "foo2".to_string(),
-                            due_at: Local::now(),
-                            title: "foo4".to_string(),
-                            html_url: "https://google.com".to_string(),
-                            submitted: true,
-                        },
-                    ],
-                    table_state: TableState::default().with_selected(Some(0)),
-                },
-            ];
             app.calculate_longest_item_lens();
         }
         Action::Tick => {}
@@ -303,9 +253,11 @@ async fn run() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let result = run().await;
+    color_eyre::install()?;
+    // let result = run().await;
+    //
+    // result?;
 
-    result?;
-
+    fetch().await?;
     Ok(())
 }
