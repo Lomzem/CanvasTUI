@@ -21,9 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
 pub enum Event {
-    Quit,
     Error,
-    Closed,
     Tick,
     Render,
     Key(KeyEvent),
@@ -37,8 +35,6 @@ pub struct Tui {
     pub event_tx: UnboundedSender<Event>,
     pub frame_rate: f64,
     pub tick_rate: f64,
-    pub mouse: bool,
-    pub paste: bool,
 }
 
 impl Tui {
@@ -49,8 +45,6 @@ impl Tui {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancellation_token = CancellationToken::new();
         let task = tokio::spawn(async {});
-        let mouse = false;
-        let paste = false;
         Ok(Self {
             terminal,
             task,
@@ -59,30 +53,18 @@ impl Tui {
             event_tx,
             frame_rate,
             tick_rate,
-            mouse,
-            paste,
         })
     }
 
+    #[allow(dead_code)]
     pub fn tick_rate(mut self, tick_rate: f64) -> Self {
         self.tick_rate = tick_rate;
         self
     }
 
+    #[allow(dead_code)]
     pub fn frame_rate(mut self, frame_rate: f64) -> Self {
         self.frame_rate = frame_rate;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn mouse(mut self, mouse: bool) -> Self {
-        self.mouse = mouse;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn paste(mut self, paste: bool) -> Self {
-        self.paste = paste;
         self
     }
 
