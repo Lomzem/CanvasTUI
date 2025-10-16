@@ -14,7 +14,6 @@ const ENDPOINT: &str = "/api/v1/planner/items";
 #[derive(Debug, Clone)]
 pub struct Calendar {
     pub dates: Vec<CalendarDate>,
-    pub current_date_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -92,10 +91,7 @@ impl<'de> Visitor<'de> for CalendarVisitor {
             })
             .collect();
 
-        Ok(Calendar {
-            dates,
-            current_date_index: 0,
-        })
+        Ok(Calendar { dates })
     }
 }
 

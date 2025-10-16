@@ -29,6 +29,7 @@ struct App {
     action_tx: UnboundedSender<Action>,
     longest_item_lens: (u16, u16, u16),
     received_fetch: bool,
+    current_date_index: usize,
 }
 
 #[derive(Clone)]
@@ -77,7 +78,7 @@ impl Widget for &mut App {
         let [date_area, event_table_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
 
-        let current_date = &mut self.calendar.dates[self.calendar.current_date_index];
+        let current_date = &mut self.calendar.dates[self.current_date_index];
         Paragraph::new(
             current_date
                 .events
@@ -175,7 +176,7 @@ fn update(app: &mut App, action: Action) {
             app.calendar = data;
             app.received_fetch = true;
             app.calculate_longest_item_lens();
-            app.calendar.current_date_index = 0;
+            // app.current_date_index = 0;
         }
         Action::FileFetchComplete(data) => {
             if app.received_fetch {
@@ -187,35 +188,30 @@ fn update(app: &mut App, action: Action) {
         Action::Tick => {}
         Action::Render => {}
         Action::PrevEvent => {
-            if let Some(current_date) = app.calendar.dates.get_mut(app.calendar.current_date_index)
-            {
+            if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
                 current_date.table_state.select_previous();
             }
         }
         Action::NextEvent => {
-            if let Some(current_date) = app.calendar.dates.get_mut(app.calendar.current_date_index)
-            {
+            if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
                 current_date.table_state.select_next();
             }
         }
         Action::NextDate => {
-            app.calendar.current_date_index = app
-                .calendar
+            app.current_date_index = app
                 .current_date_index
                 .saturating_add(1)
                 .min(app.calendar.dates.len().saturating_sub(1));
         }
         Action::PrevDate => {
-            app.calendar.current_date_index =
-                app.calendar.current_date_index.saturating_sub(1).max(0);
+            app.current_date_index = app.current_date_index.saturating_sub(1).max(0);
         }
         Action::OpenURL => {
-            let selected_idx = app.calendar.dates[app.calendar.current_date_index]
+            let selected_idx = app.calendar.dates[app.current_date_index]
                 .table_state
                 .selected()
                 .expect("Something should always be selected from list");
-            let selected_event =
-                &app.calendar.dates[app.calendar.current_date_index].events[selected_idx];
+            let selected_event = &app.calendar.dates[app.current_date_index].events[selected_idx];
             let url = env::var("CANVAS_URL")
                 .unwrap()
                 .parse::<Url>()
@@ -254,10 +250,8 @@ async fn run() -> Result<()> {
         action_tx: action_tx.clone(),
         longest_item_lens: (0, 0, 0),
         received_fetch: false,
-        calendar: Calendar {
-            current_date_index: 0,
-            dates: vec![],
-        },
+        current_date_index: 0,
+        calendar: Calendar { dates: vec![] },
     };
 
     loop {
