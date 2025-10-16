@@ -160,6 +160,34 @@ impl Widget for &mut App {
             (chosen_date.day0() + 1) as u8,
         )
         .unwrap();
+
+        let assignment_style = Style::default().fg(Color::Yellow).bg(Color::Black);
+
+        self.calendar.dates.iter().for_each(|calendar_date| {
+            let date = calendar_date.events.first().unwrap().due_at.date_naive();
+            let date = time::Date::from_calendar_date(
+                date.year(),
+                match date.month0() {
+                    0 => Month::January,
+                    1 => Month::February,
+                    2 => Month::March,
+                    3 => Month::April,
+                    4 => Month::May,
+                    5 => Month::June,
+                    6 => Month::July,
+                    7 => Month::August,
+                    8 => Month::September,
+                    9 => Month::October,
+                    10 => Month::November,
+                    11 => Month::December,
+                    _ => Month::January,
+                },
+                (date.day0() + 1) as u8,
+            )
+            .unwrap();
+            list.add(date, assignment_style);
+        });
+
         list.add(
             chosen_date,
             Style::default().fg(Color::Black).bg(Color::Red).bold(),
