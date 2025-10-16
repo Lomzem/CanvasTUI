@@ -3,6 +3,7 @@ mod tui;
 
 use std::env;
 
+use chrono::Datelike;
 use crossterm::event::KeyCode::Char;
 
 use color_eyre::eyre::Result;
@@ -13,9 +14,11 @@ use ratatui::{
     style::{Color, Style, Stylize},
     widgets::{
         Block, BorderType, Borders, Cell, Padding, Paragraph, Row, StatefulWidget, Table, Widget,
+        calendar::{CalendarEventStore, Monthly},
     },
 };
 use reqwest::Url;
+use time::Month;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tui::Event;
 
@@ -42,6 +45,7 @@ pub enum Action {
     Render,
     NextEvent,
     PrevEvent,
+    ResetDate,
     NextDate,
     PrevDate,
     OpenURL,
@@ -75,8 +79,12 @@ impl Widget for &mut App {
             return;
         }
 
-        let [date_area, event_table_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
+        let [date_area, event_table_area, calendar_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(10), /* Month, Weekday, 5 Weeks */
+        ])
+        .areas(area);
 
         let current_date = &mut self.calendar.dates[self.current_date_index];
         Paragraph::new(
@@ -127,7 +135,43 @@ impl Widget for &mut App {
             event_table_area,
             buf,
             &mut current_date.table_state,
+        );
+
+        let mut list =
+            CalendarEventStore::today(Style::default().bg(Color::White).fg(Color::Black).bold());
+        let chosen_date = current_date.events.first().unwrap().due_at.date_naive();
+        let chosen_date = time::Date::from_calendar_date(
+            chosen_date.year(),
+            match chosen_date.month0() {
+                0 => Month::January,
+                1 => Month::February,
+                2 => Month::March,
+                3 => Month::April,
+                4 => Month::May,
+                5 => Month::June,
+                6 => Month::July,
+                7 => Month::August,
+                8 => Month::September,
+                9 => Month::October,
+                10 => Month::November,
+                11 => Month::December,
+                _ => Month::January,
+            },
+            (chosen_date.day0() + 1) as u8,
         )
+        .unwrap();
+        list.add(
+            chosen_date,
+            Style::default().fg(Color::Black).bg(Color::Red).bold(),
+        );
+        let calendar_widget = Monthly::new(
+            time::Date::from_calendar_date(chosen_date.year(), chosen_date.month(), 1).unwrap(),
+            list,
+        )
+        .show_weekdays_header(Style::default())
+        .default_style(Style::default().bg(Color::Black));
+
+        calendar_widget.render(calendar_area, buf);
     }
 }
 
@@ -152,6 +196,7 @@ fn get_action(_app: &App, event: Event) -> Action {
         Event::Render => Action::Render,
         Event::Key(key) => match key.code {
             Char('q') => Action::Quit,
+            Char('0') => Action::ResetDate,
             Char('k') => Action::PrevEvent,
             Char('j') => Action::NextEvent,
             Char('h') => Action::PrevDate,
@@ -196,6 +241,9 @@ fn update(app: &mut App, action: Action) {
             if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
                 current_date.table_state.select_next();
             }
+        }
+        Action::ResetDate => {
+            app.current_date_index = 0;
         }
         Action::NextDate => {
             app.current_date_index = app
