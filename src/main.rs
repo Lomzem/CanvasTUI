@@ -16,7 +16,7 @@ use ratatui::{
     },
 };
 use reqwest::Url;
-use tokio::sync::mpsc::{self};
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tui::Event;
 
 use crate::fetch::{Calendar, fetch};
@@ -26,7 +26,7 @@ const CACHE_FILE: &str = "/tmp/canvastui.json";
 struct App {
     calendar: Calendar,
     should_quit: bool,
-    // action_tx: UnboundedSender<Action>,
+    action_tx: UnboundedSender<Action>,
     longest_item_lens: (u16, u16, u16),
     received_fetch: bool,
 }
@@ -36,6 +36,7 @@ pub enum Action {
     Tick,
     FetchComplete(Calendar),
     FileFetchComplete(Calendar),
+    Fetch,
     Quit,
     Render,
     NextEvent,
@@ -153,6 +154,7 @@ fn get_action(_app: &App, event: Event) -> Action {
             Char('k') => Action::PrevEvent,
             Char('j') => Action::NextEvent,
             Char('h') => Action::PrevDate,
+            Char('u') => Action::Fetch,
             Char('l') => Action::NextDate,
             Char('o') => Action::OpenURL,
             _ => Action::None,
@@ -163,6 +165,12 @@ fn get_action(_app: &App, event: Event) -> Action {
 fn update(app: &mut App, action: Action) {
     match action {
         Action::Quit => app.should_quit = true,
+        Action::Fetch => {
+            let mut action_tx = app.action_tx.clone();
+            tokio::spawn(async move {
+                fetch(&mut action_tx).await.unwrap();
+            });
+        }
         Action::FetchComplete(data) => {
             app.calendar = data;
             app.received_fetch = true;
@@ -243,7 +251,7 @@ async fn run() -> Result<()> {
 
     let mut app = App {
         should_quit: false,
-        // action_tx: action_tx.clone(),
+        action_tx: action_tx.clone(),
         longest_item_lens: (0, 0, 0),
         received_fetch: false,
         calendar: Calendar {
