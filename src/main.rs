@@ -1,9 +1,6 @@
 mod fetch;
 mod tui;
 
-use std::time::Duration;
-
-use chrono::{Local, NaiveDate};
 use crossterm::event::KeyCode::Char;
 
 use color_eyre::eyre::Result;
@@ -13,14 +10,13 @@ use ratatui::{
     prelude::{Buffer, Rect},
     style::{Color, Style, Stylize},
     widgets::{
-        Block, BorderType, Borders, Cell, Padding, Paragraph, Row, StatefulWidget, Table,
-        TableState, Widget,
+        Block, BorderType, Borders, Cell, Padding, Paragraph, Row, StatefulWidget, Table, Widget,
     },
 };
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tui::Event;
 
-use crate::fetch::{Calendar, CalendarDate, CalendarEvent, fetch};
+use crate::fetch::{Calendar, fetch};
 
 struct App {
     calendar: Calendar,
@@ -32,7 +28,7 @@ struct App {
 #[derive(Clone)]
 pub enum Action {
     Tick,
-    FetchComplete(i64),
+    FetchComplete(Calendar),
     Quit,
     Render,
     NextEvent,
@@ -161,6 +157,7 @@ fn update(app: &mut App, action: Action) {
     match action {
         Action::Quit => app.should_quit = true,
         Action::FetchComplete(data) => {
+            app.calendar = data;
             app.calculate_longest_item_lens();
         }
         Action::Tick => {}
@@ -178,7 +175,11 @@ fn update(app: &mut App, action: Action) {
             }
         }
         Action::NextDate => {
-            app.calendar.current_date_index = app.calendar.dates.len().saturating_sub(1).max(0);
+            app.calendar.current_date_index = app
+                .calendar
+                .current_date_index
+                .saturating_add(1)
+                .min(app.calendar.dates.len().saturating_sub(1));
         }
         Action::PrevDate => {
             app.calendar.current_date_index =
@@ -201,10 +202,9 @@ async fn run() -> Result<()> {
     let (action_tx, mut action_rx) = mpsc::unbounded_channel(); // new
 
     {
-        let action_tx = action_tx.clone();
+        let mut action_tx = action_tx.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await; // simulate network request
-            action_tx.send(Action::FetchComplete(67)).unwrap();
+            fetch(&mut action_tx).await.unwrap();
         });
     }
 
@@ -254,10 +254,9 @@ async fn run() -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    // let result = run().await;
-    //
-    // result?;
+    let result = run().await;
 
-    fetch().await?;
+    result?;
+
     Ok(())
 }

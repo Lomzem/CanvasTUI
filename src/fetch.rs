@@ -1,26 +1,29 @@
-use std::{collections::BTreeMap, env, fmt::Formatter};
+use std::{collections::BTreeMap, env};
 
 use chrono::{DateTime, Local, NaiveDate};
 use color_eyre::eyre::Result;
 use ratatui::widgets::TableState;
 use reqwest::Url;
 use serde::{Deserialize, de::Visitor};
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::Action;
 
 const ENDPOINT: &str = "/api/v1/planner/items";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Calendar {
     pub dates: Vec<CalendarDate>,
     pub current_date_index: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CalendarDate {
     pub events: Vec<CalendarEvent>,
     pub table_state: TableState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CalendarEvent {
     pub course_name: String,
     pub due_at: DateTime<Local>,
@@ -80,7 +83,7 @@ impl<'de> Visitor<'de> for CalendarVisitor {
             .into_iter()
             .map(|(_, events)| CalendarDate {
                 events: events,
-                table_state: TableState::default(),
+                table_state: TableState::default().with_selected(0),
             })
             .collect();
 
@@ -100,7 +103,7 @@ impl<'de> Deserialize<'de> for Calendar {
     }
 }
 
-pub async fn fetch() -> Result<()> {
+pub async fn fetch(action_tx: &mut UnboundedSender<Action>) -> Result<()> {
     let access_token = env::var("CANVAS_ACCESS_TOKEN")?;
 
     let mut url = env::var("CANVAS_URL")
@@ -115,6 +118,6 @@ pub async fn fetch() -> Result<()> {
 
     let response = reqwest::get(url).await?;
     let calendar: Calendar = response.json().await?;
-    dbg!(&calendar);
+    action_tx.send(Action::FetchComplete(calendar))?;
     Ok(())
 }
