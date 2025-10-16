@@ -1,6 +1,8 @@
 mod fetch;
 mod tui;
 
+use std::env;
+
 use crossterm::event::KeyCode::Char;
 
 use color_eyre::eyre::Result;
@@ -13,6 +15,7 @@ use ratatui::{
         Block, BorderType, Borders, Cell, Padding, Paragraph, Row, StatefulWidget, Table, Widget,
     },
 };
+use reqwest::Url;
 use tokio::sync::mpsc::{self};
 use tui::Event;
 
@@ -51,7 +54,7 @@ impl App {
                 let title_len = event.title.len() as u16;
                 let due_at_len = event.due_at.format("  %H:%M").to_string().len() as u16;
                 self.longest_item_lens = (
-                    course_name_len.max(self.longest_item_lens.0) + 1,
+                    course_name_len.max(self.longest_item_lens.0),
                     title_len.max(self.longest_item_lens.1),
                     due_at_len.max(self.longest_item_lens.2),
                 );
@@ -109,9 +112,9 @@ impl Widget for &mut App {
         let event_table = Table::new(
             rows,
             [
-                Constraint::Length(self.longest_item_lens.0 + 1),
+                Constraint::Length(self.longest_item_lens.0 + 2),
                 Constraint::Min(self.longest_item_lens.1.max("Assignment".len() as u16) + 2),
-                Constraint::Length(self.longest_item_lens.2 + 2),
+                Constraint::Length(self.longest_item_lens.2 + 1),
             ],
         )
         .header(header)
@@ -205,7 +208,13 @@ fn update(app: &mut App, action: Action) {
                 .expect("Something should always be selected from list");
             let selected_event =
                 &app.calendar.dates[app.calendar.current_date_index].events[selected_idx];
-            webbrowser::open(&selected_event.html_url).unwrap();
+            let url = env::var("CANVAS_URL")
+                .unwrap()
+                .parse::<Url>()
+                .unwrap()
+                .join(&selected_event.html_url)
+                .unwrap();
+            webbrowser::open(url.as_str()).unwrap();
         }
         Action::None => {}
     };

@@ -71,7 +71,12 @@ impl<'de> Visitor<'de> for CalendarVisitor {
                 .entry(local_due_at.date_naive())
                 .or_default()
                 .push(CalendarEvent {
-                    course_name: item.context_name,
+                    course_name: item
+                        .context_name
+                        .split_whitespace()
+                        .take(2)
+                        .collect::<Vec<&str>>()
+                        .join("-"),
                     due_at: item.plannable.due_at.with_timezone(&Local),
                     title: item.plannable.title,
                     html_url: item.html_url,
