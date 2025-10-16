@@ -262,12 +262,20 @@ fn update(app: &mut App, action: Action) {
         Action::Render => {}
         Action::PrevEvent => {
             if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
-                current_date.table_state.select_previous();
+                if current_date.table_state.selected().unwrap() == 0 {
+                    current_date.table_state.select_last();
+                } else {
+                    current_date.table_state.select_previous();
+                }
             }
         }
         Action::NextEvent => {
             if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
-                current_date.table_state.select_next();
+                if current_date.table_state.selected().unwrap() == current_date.events.len() - 1 {
+                    current_date.table_state.select_first();
+                } else {
+                    current_date.table_state.select_next();
+                }
             }
         }
         Action::ResetDate => {
