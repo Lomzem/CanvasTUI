@@ -122,9 +122,9 @@ impl Widget for &mut App {
         let event_table = Table::new(
             rows,
             [
-                Constraint::Length(self.longest_item_lens.0 + 2),
+                Constraint::Min(self.longest_item_lens.0 + 2),
                 Constraint::Min(self.longest_item_lens.1.max("Assignment".len() as u16) + 2),
-                Constraint::Length(self.longest_item_lens.2 + 1),
+                Constraint::Min(self.longest_item_lens.2 + 1),
             ],
         )
         .header(header)
