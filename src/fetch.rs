@@ -7,7 +7,7 @@ use reqwest::Url;
 use serde::{Deserialize, de::Visitor};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::Action;
+use crate::{Action, CACHE_FILE};
 
 const ENDPOINT: &str = "/api/v1/planner/items";
 
@@ -117,7 +117,9 @@ pub async fn fetch(action_tx: &mut UnboundedSender<Action>) -> Result<()> {
         .append_pair("start_date", &Local::now().format("%Y-%m-%d").to_string());
 
     let response = reqwest::get(url).await?;
-    let calendar: Calendar = response.json().await?;
+    let body_bytes = response.bytes().await?;
+    let calendar: Calendar = serde_json::from_slice(&body_bytes)?;
     action_tx.send(Action::FetchComplete(calendar))?;
+    tokio::fs::write(CACHE_FILE, &body_bytes).await?;
     Ok(())
 }

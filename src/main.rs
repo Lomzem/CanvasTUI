@@ -13,22 +13,26 @@ use ratatui::{
         Block, BorderType, Borders, Cell, Padding, Paragraph, Row, StatefulWidget, Table, Widget,
     },
 };
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::{self};
 use tui::Event;
 
 use crate::fetch::{Calendar, fetch};
 
+const CACHE_FILE: &str = "/tmp/canvastui.json";
+
 struct App {
     calendar: Calendar,
     should_quit: bool,
-    action_tx: UnboundedSender<Action>,
+    // action_tx: UnboundedSender<Action>,
     longest_item_lens: (u16, u16, u16),
+    received_fetch: bool,
 }
 
 #[derive(Clone)]
 pub enum Action {
     Tick,
     FetchComplete(Calendar),
+    FileFetchComplete(Calendar),
     Quit,
     Render,
     NextEvent,
@@ -158,6 +162,14 @@ fn update(app: &mut App, action: Action) {
         Action::Quit => app.should_quit = true,
         Action::FetchComplete(data) => {
             app.calendar = data;
+            app.received_fetch = true;
+            app.calculate_longest_item_lens();
+        }
+        Action::FileFetchComplete(data) => {
+            if app.received_fetch {
+                return;
+            }
+            app.calendar = data;
             app.calculate_longest_item_lens();
         }
         Action::Tick => {}
@@ -202,6 +214,14 @@ async fn run() -> Result<()> {
     let (action_tx, mut action_rx) = mpsc::unbounded_channel(); // new
 
     {
+        let action_tx = action_tx.clone();
+        tokio::spawn(async move {
+            let cached_body_bytes = tokio::fs::read(CACHE_FILE).await.unwrap();
+            let calendar: Calendar = serde_json::from_slice(&cached_body_bytes).unwrap();
+            action_tx.send(Action::FileFetchComplete(calendar)).unwrap();
+        });
+    }
+    {
         let mut action_tx = action_tx.clone();
         tokio::spawn(async move {
             fetch(&mut action_tx).await.unwrap();
@@ -213,8 +233,9 @@ async fn run() -> Result<()> {
 
     let mut app = App {
         should_quit: false,
-        action_tx: action_tx.clone(),
+        // action_tx: action_tx.clone(),
         longest_item_lens: (0, 0, 0),
+        received_fetch: false,
         calendar: Calendar {
             current_date_index: 0,
             dates: vec![],
