@@ -164,6 +164,7 @@ fn update(app: &mut App, action: Action) {
             app.calendar = data;
             app.received_fetch = true;
             app.calculate_longest_item_lens();
+            app.calendar.current_date_index = 0;
         }
         Action::FileFetchComplete(data) => {
             if app.received_fetch {
