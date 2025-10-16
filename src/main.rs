@@ -104,8 +104,15 @@ impl Widget for &mut App {
             Row::new([
                 Cell::from(e.course_name.to_string()),
                 Cell::from(e.title.to_string()),
-                Cell::from(e.due_at.format("%H:%M").to_string()),
+                match e.submitted {
+                    true => Cell::from(e.due_at.format("%H:%M 󰸞").to_string()),
+                    false => Cell::from(e.due_at.format("%H:%M  ").to_string()),
+                },
             ])
+            .style(Style::default().fg(match e.submitted {
+                true => Color::Green,
+                false => Color::White,
+            }))
         });
         let event_table = Table::new(
             rows,
@@ -116,8 +123,8 @@ impl Widget for &mut App {
             ],
         )
         .header(header)
-        .style(Style::default().fg(Color::White))
-        .row_highlight_style(Style::default().bg(Color::Black).fg(Color::White));
+        .row_highlight_style(Style::default().bg(Color::Black))
+        .style(Style::default().fg(Color::White));
         StatefulWidget::render(
             event_table,
             event_table_area,
