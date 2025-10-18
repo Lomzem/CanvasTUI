@@ -35,19 +35,21 @@ pub struct CalendarEvent {
 struct CanvasPlannerNote {
     context_name: String,
     html_url: String,
-    submissions: CanvasSubmissions,
+    submissions: SubmissionStatus,
     plannable: CanvasPlannable,
+    plannable_date: DateTime<Local>,
 }
 
 #[derive(Debug, Deserialize)]
-struct CanvasSubmissions {
-    submitted: bool,
+#[serde(untagged)]
+enum SubmissionStatus {
+    Bool(bool),
+    Object { submitted: bool },
 }
 
 #[derive(Debug, Deserialize)]
 struct CanvasPlannable {
     title: String,
-    due_at: DateTime<Local>,
 }
 
 struct CalendarVisitor {}
@@ -65,7 +67,11 @@ impl<'de> Visitor<'de> for CalendarVisitor {
         let mut events: BTreeMap<NaiveDate, Vec<CalendarEvent>> = BTreeMap::new();
 
         while let Some(item) = seq.next_element::<CanvasPlannerNote>()? {
-            let local_due_at = item.plannable.due_at.with_timezone(&Local);
+            let local_due_at = item.plannable_date.with_timezone(&Local);
+            let submission_status = match item.submissions {
+                SubmissionStatus::Bool(submitted) => submitted,
+                SubmissionStatus::Object { submitted } => submitted,
+            };
             events
                 .entry(local_due_at.date_naive())
                 .or_default()
@@ -76,10 +82,10 @@ impl<'de> Visitor<'de> for CalendarVisitor {
                         .take(2)
                         .collect::<Vec<&str>>()
                         .join("-"),
-                    due_at: item.plannable.due_at.with_timezone(&Local),
+                    due_at: item.plannable_date.with_timezone(&Local),
                     title: item.plannable.title,
                     html_url: item.html_url,
-                    submitted: item.submissions.submitted,
+                    submitted: submission_status,
                 });
         }
 
