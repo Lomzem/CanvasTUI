@@ -3,7 +3,6 @@ mod tui;
 
 use std::env;
 
-use chrono::{Datelike, Local};
 use crossterm::event::KeyCode::Char;
 
 use color_eyre::eyre::Result;
@@ -18,7 +17,7 @@ use ratatui::{
     },
 };
 use reqwest::Url;
-use time::{Month, OffsetDateTime};
+use time::{OffsetDateTime, format_description};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tui::Event;
 
@@ -58,7 +57,11 @@ impl App {
             date.events.iter().for_each(|event| {
                 let course_name_len = event.course_name.len() as u16;
                 let title_len = event.title.len() as u16;
-                let due_at_len = event.due_at.format("  %H:%M").to_string().len() as u16;
+                let due_at_len = event
+                    .due_at
+                    .format(&format_description::parse("  [hour]:[minute]").unwrap())
+                    .unwrap()
+                    .len() as u16;
                 self.longest_item_lens = (
                     course_name_len.max(self.longest_item_lens.0),
                     title_len.max(self.longest_item_lens.1),
@@ -86,15 +89,20 @@ impl Widget for &mut App {
         ])
         .areas(area);
 
-        let current_date = &mut self.calendar.dates[self.current_date_index];
+        let current_cal_date = &mut self.calendar.dates[self.current_date_index];
         Paragraph::new(
-            current_date
+            current_cal_date
                 .events
                 .first()
                 .unwrap()
                 .due_at
-                .format("%A %b %-d")
-                .to_string(),
+                .format(
+                    &format_description::parse(
+                        "[weekday repr:long] [month repr:short] [day padding:none]",
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
         )
         .style(Style::default().fg(Color::Magenta).bold())
         .render(date_area, buf);
@@ -105,13 +113,21 @@ impl Widget for &mut App {
             .collect::<Row>()
             .height(1)
             .style(Style::default().fg(Color::Magenta));
-        let rows = current_date.events.iter().map(|e| {
+        let rows = current_cal_date.events.iter().map(|e| {
             Row::new([
                 Cell::from(e.course_name.to_string()),
                 Cell::from(e.title.to_string()),
                 match e.submitted {
-                    true => Cell::from(e.due_at.format("%H:%M 󰸞").to_string()),
-                    false => Cell::from(e.due_at.format("%H:%M  ").to_string()),
+                    true => Cell::from(
+                        e.due_at
+                            .format(&format_description::parse("[hour]:[minute] 󰸞").unwrap())
+                            .unwrap(),
+                    ),
+                    false => Cell::from(
+                        e.due_at
+                            .format(&format_description::parse("[hour]:[minute]  ").unwrap())
+                            .unwrap(),
+                    ),
                 },
             ])
             .style(Style::default().fg(match e.submitted {
@@ -134,64 +150,22 @@ impl Widget for &mut App {
             event_table,
             event_table_area,
             buf,
-            &mut current_date.table_state,
+            &mut current_cal_date.table_state,
         );
 
         let mut list =
             CalendarEventStore::today(Style::default().bg(Color::White).fg(Color::Black).bold());
-        let chosen_date = current_date.events.first().unwrap().due_at.date_naive();
-        let chosen_date = time::Date::from_calendar_date(
-            chosen_date.year(),
-            match chosen_date.month0() {
-                0 => Month::January,
-                1 => Month::February,
-                2 => Month::March,
-                3 => Month::April,
-                4 => Month::May,
-                5 => Month::June,
-                6 => Month::July,
-                7 => Month::August,
-                8 => Month::September,
-                9 => Month::October,
-                10 => Month::November,
-                11 => Month::December,
-                _ => Month::January,
-            },
-            (chosen_date.day0() + 1) as u8,
-        )
-        .unwrap();
+        let chosen_date = current_cal_date.events.first().unwrap().due_at.date();
 
         let assignment_style = Style::default().fg(Color::Yellow).bg(Color::Black);
 
-        self.calendar.dates.iter().for_each(|calendar_date| {
-            let date = calendar_date.events.first().unwrap().due_at.date_naive();
+        let current_date = OffsetDateTime::now_local().unwrap().date();
 
-            if date == Local::now().date_naive() {
+        self.calendar.dates.iter().for_each(|calendar_date| {
+            let date = calendar_date.events.first().unwrap().due_at.date();
+            if date == current_date {
                 return;
             }
-
-            /* Convert `chrono` date to `time` date
-             * ratatui CalendarEventStore expects a `time` date */
-            let date = time::Date::from_calendar_date(
-                date.year(),
-                match date.month0() {
-                    0 => Month::January,
-                    1 => Month::February,
-                    2 => Month::March,
-                    3 => Month::April,
-                    4 => Month::May,
-                    5 => Month::June,
-                    6 => Month::July,
-                    7 => Month::August,
-                    8 => Month::September,
-                    9 => Month::October,
-                    10 => Month::November,
-                    11 => Month::December,
-                    _ => Month::January,
-                },
-                (date.day0() + 1) as u8,
-            )
-            .unwrap();
             list.add(date, assignment_style);
         });
 

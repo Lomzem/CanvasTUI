@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, env};
 
-use chrono::{DateTime, Local, NaiveDate};
 use color_eyre::eyre::Result;
 use ratatui::widgets::TableState;
 use reqwest::Url;
 use serde::{Deserialize, de::Visitor};
+use time::{Date, OffsetDateTime, PrimitiveDateTime, UtcOffset, format_description};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{Action, CACHE_FILE};
@@ -25,7 +25,7 @@ pub struct CalendarDate {
 #[derive(Debug, Clone)]
 pub struct CalendarEvent {
     pub course_name: String,
-    pub due_at: DateTime<Local>,
+    pub due_at: PrimitiveDateTime,
     pub title: String,
     pub html_url: String,
     pub submitted: bool,
@@ -37,7 +37,8 @@ struct CanvasPlannerNote {
     html_url: String,
     submissions: SubmissionStatus,
     plannable: CanvasPlannable,
-    plannable_date: DateTime<Local>,
+    #[serde(deserialize_with = "time::serde::iso8601::deserialize")]
+    plannable_date: OffsetDateTime,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,16 +65,16 @@ impl<'de> Visitor<'de> for CalendarVisitor {
     where
         A: serde::de::SeqAccess<'de>,
     {
-        let mut events: BTreeMap<NaiveDate, Vec<CalendarEvent>> = BTreeMap::new();
+        let mut events: BTreeMap<Date, Vec<CalendarEvent>> = BTreeMap::new();
 
         while let Some(item) = seq.next_element::<CanvasPlannerNote>()? {
-            let local_due_at = item.plannable_date.with_timezone(&Local);
+            let local_due_at = item.plannable_date;
             let submission_status = match item.submissions {
                 SubmissionStatus::Bool(submitted) => submitted,
                 SubmissionStatus::Object { submitted } => submitted,
             };
             events
-                .entry(local_due_at.date_naive())
+                .entry(local_due_at.date())
                 .or_default()
                 .push(CalendarEvent {
                     course_name: item
@@ -82,7 +83,12 @@ impl<'de> Visitor<'de> for CalendarVisitor {
                         .take(2)
                         .collect::<Vec<&str>>()
                         .join("-"),
-                    due_at: item.plannable_date.with_timezone(&Local),
+                    due_at: {
+                        /* Remove timezone info */
+                        let local_offset = UtcOffset::current_local_offset().unwrap();
+                        let local_odt = item.plannable_date.to_offset(local_offset);
+                        PrimitiveDateTime::new(local_odt.date(), local_odt.time())
+                    },
                     title: item.plannable.title,
                     html_url: item.html_url,
                     submitted: submission_status,
@@ -119,9 +125,18 @@ pub async fn fetch(action_tx: &mut UnboundedSender<Action>) -> Result<()> {
         .unwrap()
         .join(ENDPOINT)?;
 
+    let current_date = OffsetDateTime::now_local()
+        .expect("Could not get current date")
+        .date();
     url.query_pairs_mut()
         .append_pair("access_token", &access_token)
-        .append_pair("start_date", &Local::now().format("%Y-%m-%d").to_string());
+        .append_pair(
+            "start_date",
+            &current_date
+                .format(&format_description::parse("[year]-[month]-[day]").unwrap())
+                .expect("Could not format date")
+                .to_string(),
+        );
 
     let response = reqwest::get(url).await?;
     let body_bytes = response.bytes().await?;
