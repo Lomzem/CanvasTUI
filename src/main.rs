@@ -314,7 +314,12 @@ async fn run() -> Result<()> {
     {
         let action_tx = action_tx.clone();
         tokio::spawn(async move {
-            let cached_body_bytes = tokio::fs::read(CACHE_FILE).await.unwrap();
+            let cached_body_bytes = match tokio::fs::read(CACHE_FILE).await {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    return;
+                }
+            };
             let calendar: Calendar = serde_json::from_slice(&cached_body_bytes).unwrap();
             action_tx.send(Action::FileFetchComplete(calendar)).unwrap();
         });
