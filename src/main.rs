@@ -3,7 +3,7 @@ mod tui;
 
 use std::env;
 
-use chrono::Datelike;
+use chrono::{Datelike, Local};
 use crossterm::event::KeyCode::Char;
 
 use color_eyre::eyre::Result;
@@ -18,7 +18,7 @@ use ratatui::{
     },
 };
 use reqwest::Url;
-use time::Month;
+use time::{Month, OffsetDateTime};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tui::Event;
 
@@ -165,6 +165,13 @@ impl Widget for &mut App {
 
         self.calendar.dates.iter().for_each(|calendar_date| {
             let date = calendar_date.events.first().unwrap().due_at.date_naive();
+
+            if date == Local::now().date_naive() {
+                return;
+            }
+
+            /* Convert `chrono` date to `time` date
+             * ratatui CalendarEventStore expects a `time` date */
             let date = time::Date::from_calendar_date(
                 date.year(),
                 match date.month0() {
@@ -187,6 +194,18 @@ impl Widget for &mut App {
             .unwrap();
             list.add(date, assignment_style);
         });
+
+        let current_date = OffsetDateTime::now_local().unwrap().date();
+        match self.calendar.dates.first().unwrap().events.is_empty() {
+            true => list.add(
+                current_date,
+                Style::default().bg(Color::White).fg(Color::Black),
+            ),
+            false => list.add(
+                current_date,
+                Style::default().bg(Color::Yellow).fg(Color::Black),
+            ),
+        }
 
         list.add(
             chosen_date,
