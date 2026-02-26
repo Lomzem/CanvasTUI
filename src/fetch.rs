@@ -96,9 +96,9 @@ impl<'de> Visitor<'de> for CalendarVisitor {
         }
 
         let dates: Vec<_> = events
-            .into_iter()
-            .map(|(_, events)| CalendarDate {
-                events: events,
+            .into_values()
+            .map(|events| CalendarDate {
+                events,
                 table_state: TableState::default().with_selected(0),
             })
             .collect();
