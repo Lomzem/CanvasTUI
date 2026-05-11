@@ -1,25 +1,39 @@
 # CanvasTUI
 
-This is a tool meant for the terminal that allows me to view my upcoming assignments on [canvas](https://www.instructure.com/canvas) faster.
+CanvasTUI is a personal terminal client for Canvas planner items. It is optimized for instant startup from cache and fast keyboard navigation.
 
-The tool is designed specifically for me personally, but it's also possible to repurpose it for your own canvas account as well.
+## Setup
 
-## Prerequisites
-- The app uses environment variables to get your [Canvas Access Key](https://community.canvaslms.com/t5/Admin-Guide/How-do-I-manage-API-access-tokens-as-an-admin/ta-p/89)
-- Store the Canvas Access Token in the environment variable **CANVAS_ACCESS_TOKEN** (for example add this to your .bashrc file):
+Set these environment variables in your shell:
+
 ```bash
-export CANVAS_ACCESS_TOKEN="key-here"
+export CANVAS_URL="https://canvas.example.edu"
+export CANVAS_ACCESS_TOKEN="your-token"
 ```
-- Store the Base Canvas URL in the environment variable **CANVAS_URL** (for example add this to your .bashrc file):
-```bash
-export CANVAS_URL="https://canvas.csuchico.edu"
-``````
+
+The app uses the Canvas planner API with `Authorization: Bearer ...` authentication.
+
+## Behavior
+
+1. On startup, CanvasTUI loads cached planner data from `~/.cache/canvastui/snapshot.json` or `$XDG_CACHE_HOME/canvastui/snapshot.json`.
+2. It immediately revalidates in the background.
+3. It fetches all planner item types for the loaded date range.
+4. It skips empty dates when navigating.
+5. It automatically loads older or newer chunks as you move beyond the currently loaded range.
+
+Default range behavior:
+
+1. Initial refresh: `today .. today + 60 days`
+2. Automatic history expansion: `30` days per chunk backward or forward
 
 ## Controls
-I based the controls on Vim bindings as a Neovim user. Here are the current supported keybinds:
-- `j`: Move down
-- `k`: Move up
-- `h`: Go to previous day
-- `l`: Go to next day
-- `o`: Open the url in your browser
-- `q`: Quit the app
+
+- `j` / `k`: next / previous item
+- `h` / `l`: previous / next populated day
+- `g` / `G`: first / last loaded populated day
+- `0`: jump back to the default landing day
+- `r`: refresh loaded planner data
+- `o`: open the selected item if Canvas provides an `html_url`
+- `q`: quit
+
+Submitted or completed items stay visible with a checkmark and green styling.

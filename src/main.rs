@@ -1,359 +1,69 @@
-mod fetch;
+mod app;
+mod cache;
+mod canvas;
+mod config;
+mod domain;
 mod tui;
+mod ui;
 
-use std::env;
+use app::{App, FetchReason, FetchRequest};
+use color_eyre::eyre::{Context, Result};
+use crossterm::event::{KeyCode, KeyModifiers};
+use domain::AgendaSnapshot;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crossterm::event::KeyCode::Char;
-
-use color_eyre::eyre::Result;
-use ratatui::{
-    Frame,
-    layout::{Alignment, Constraint, Layout},
-    prelude::{Buffer, Rect},
-    style::{Color, Style, Stylize},
-    widgets::{
-        Block, BorderType, Borders, Cell, Padding, Paragraph, Row, StatefulWidget, Table, Widget,
-        calendar::{CalendarEventStore, Monthly},
-    },
-};
-use reqwest::Url;
-use time::{OffsetDateTime, format_description};
-use tokio::sync::mpsc::{self, UnboundedSender};
-use tui::Event;
-
-use crate::fetch::{Calendar, fetch};
-
-const CACHE_FILE: &str = "/tmp/canvastui.json";
-
-struct App {
-    calendar: Calendar,
-    should_quit: bool,
-    action_tx: UnboundedSender<Action>,
-    longest_item_lens: (u16, u16, u16),
-    received_fetch: bool,
-    current_date_index: usize,
+struct FetchResult {
+    request: FetchRequest,
+    result: Result<AgendaSnapshot>,
 }
 
-#[derive(Clone)]
-pub enum Action {
-    Tick,
-    FetchComplete(Calendar),
-    FileFetchComplete(Calendar),
-    Fetch,
-    Quit,
-    Render,
-    NextEvent,
-    PrevEvent,
-    ResetDate,
-    NextDate,
-    PrevDate,
-    OpenURL,
-    None,
-}
-
-impl App {
-    pub fn calculate_longest_item_lens(&mut self) {
-        self.calendar.dates.iter().for_each(|date| {
-            date.events.iter().for_each(|event| {
-                let course_name_len = event.course_name.len() as u16;
-                let title_len = event.title.len() as u16;
-                let due_at_len = event
-                    .due_at
-                    .format(&format_description::parse("  [hour]:[minute]").unwrap())
-                    .unwrap()
-                    .len() as u16;
-                self.longest_item_lens = (
-                    course_name_len.max(self.longest_item_lens.0),
-                    title_len.max(self.longest_item_lens.1),
-                    due_at_len.max(self.longest_item_lens.2),
-                );
-            });
-        });
-    }
-}
-
-impl Widget for &mut App {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
-        if self.calendar.dates.is_empty() {
-            Paragraph::new("Waiting for data...").render(area, buf);
-            return;
-        }
-
-        let [date_area, event_table_area, calendar_area] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(10), /* Month, Weekday, 5 Weeks */
-        ])
-        .areas(area);
-
-        let current_cal_date = &mut self.calendar.dates[self.current_date_index];
-        Paragraph::new(
-            current_cal_date
-                .events
-                .first()
-                .unwrap()
-                .due_at
-                .format(
-                    &format_description::parse(
-                        "[weekday repr:long] [month repr:short] [day padding:none]",
-                    )
-                    .unwrap(),
-                )
-                .unwrap(),
-        )
-        .style(Style::default().fg(Color::Magenta).bold())
-        .render(date_area, buf);
-
-        let header = ["Course", "Assignment", "Due"]
-            .into_iter()
-            .map(Cell::from)
-            .collect::<Row>()
-            .height(1)
-            .style(Style::default().fg(Color::Magenta));
-        let rows = current_cal_date.events.iter().map(|e| {
-            Row::new([
-                Cell::from(e.course_name.to_string()),
-                Cell::from(e.title.to_string()),
-                match e.submitted {
-                    true => Cell::from(
-                        e.due_at
-                            .format(&format_description::parse("[hour]:[minute] 󰸞").unwrap())
-                            .unwrap(),
-                    ),
-                    false => Cell::from(
-                        e.due_at
-                            .format(&format_description::parse("[hour]:[minute]  ").unwrap())
-                            .unwrap(),
-                    ),
-                },
-            ])
-            .style(Style::default().fg(match e.submitted {
-                true => Color::Green,
-                false => Color::White,
-            }))
-        });
-        let event_table = Table::new(
-            rows,
-            [
-                Constraint::Min(self.longest_item_lens.0 + 2),
-                Constraint::Min(self.longest_item_lens.1.max("Assignment".len() as u16) + 2),
-                Constraint::Min(self.longest_item_lens.2 + 1),
-            ],
-        )
-        .header(header)
-        .row_highlight_style(Style::default().bg(Color::Black))
-        .style(Style::default().fg(Color::White));
-        StatefulWidget::render(
-            event_table,
-            event_table_area,
-            buf,
-            &mut current_cal_date.table_state,
-        );
-
-        let mut list =
-            CalendarEventStore::today(Style::default().bg(Color::White).fg(Color::Black).bold());
-        let chosen_date = current_cal_date.events.first().unwrap().due_at.date();
-
-        let assignment_style = Style::default().fg(Color::Yellow).bg(Color::Black);
-
-        let current_date = OffsetDateTime::now_local().unwrap().date();
-
-        self.calendar.dates.iter().for_each(|calendar_date| {
-            let date = calendar_date.events.first().unwrap().due_at.date();
-            if date == current_date {
-                return;
-            }
-            list.add(date, assignment_style);
-        });
-
-        let current_date = OffsetDateTime::now_local().unwrap().date();
-        match self.calendar.dates.first().unwrap().events.is_empty() {
-            true => list.add(
-                current_date,
-                Style::default().bg(Color::White).fg(Color::Black),
-            ),
-            false => list.add(
-                current_date,
-                Style::default().bg(Color::Yellow).fg(Color::Black),
-            ),
-        }
-
-        list.add(
-            chosen_date,
-            Style::default().fg(Color::Black).bg(Color::Red).bold(),
-        );
-        let calendar_widget = Monthly::new(
-            time::Date::from_calendar_date(chosen_date.year(), chosen_date.month(), 1).unwrap(),
-            list,
-        )
-        .show_weekdays_header(Style::default())
-        .default_style(Style::default().bg(Color::Black));
-
-        calendar_widget.render(calendar_area, buf);
-    }
-}
-
-fn ui(frame: &mut Frame, app: &mut App) {
-    let block = Block::default()
-        .title(" CanvasTUI ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Thick)
-        .style(Style::default().fg(Color::Blue))
-        .padding(Padding::horizontal(1))
-        .title_alignment(Alignment::Center);
-    let block_area = block.inner(frame.area());
-    block.render(frame.area(), frame.buffer_mut());
-    app.render(block_area, frame.buffer_mut())
-}
-
-fn get_action(_app: &App, event: Event) -> Action {
-    match event {
-        Event::Error => Action::None,
-        Event::Tick => Action::Tick,
-        Event::Render => Action::Render,
-        Event::Key(key) => match key.code {
-            Char('q') => Action::Quit,
-            Char('0') => Action::ResetDate,
-            Char('k') => Action::PrevEvent,
-            Char('j') => Action::NextEvent,
-            Char('h') => Action::PrevDate,
-            Char('u') => Action::Fetch,
-            Char('l') => Action::NextDate,
-            Char('o') => Action::OpenURL,
-            _ => Action::None,
-        },
-    }
-}
-
-fn update(app: &mut App, action: Action) {
-    match action {
-        Action::Quit => app.should_quit = true,
-        Action::Fetch => {
-            let mut action_tx = app.action_tx.clone();
-            tokio::spawn(async move {
-                fetch(&mut action_tx).await.unwrap();
-            });
-        }
-        Action::FetchComplete(data) => {
-            app.calendar = data;
-            app.received_fetch = true;
-            app.calculate_longest_item_lens();
-            // app.current_date_index = 0;
-        }
-        Action::FileFetchComplete(data) => {
-            if app.received_fetch {
-                return;
-            }
-            app.calendar = data;
-            app.calculate_longest_item_lens();
-        }
-        Action::Tick => {}
-        Action::Render => {}
-        Action::PrevEvent => {
-            if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
-                if current_date.table_state.selected().unwrap() == 0 {
-                    current_date.table_state.select_last();
-                } else {
-                    current_date.table_state.select_previous();
-                }
-            }
-        }
-        Action::NextEvent => {
-            if let Some(current_date) = app.calendar.dates.get_mut(app.current_date_index) {
-                if current_date.table_state.selected().unwrap() == current_date.events.len() - 1 {
-                    current_date.table_state.select_first();
-                } else {
-                    current_date.table_state.select_next();
-                }
-            }
-        }
-        Action::ResetDate => {
-            app.current_date_index = 0;
-        }
-        Action::NextDate => {
-            app.current_date_index = app
-                .current_date_index
-                .saturating_add(1)
-                .min(app.calendar.dates.len().saturating_sub(1));
-        }
-        Action::PrevDate => {
-            app.current_date_index = app.current_date_index.saturating_sub(1).max(0);
-        }
-        Action::OpenURL => {
-            let selected_idx = app.calendar.dates[app.current_date_index]
-                .table_state
-                .selected()
-                .expect("Something should always be selected from list");
-            let selected_event = &app.calendar.dates[app.current_date_index].events[selected_idx];
-            let url = env::var("CANVAS_URL")
-                .unwrap()
-                .parse::<Url>()
-                .unwrap()
-                .join(&selected_event.html_url)
-                .unwrap();
-            webbrowser::open(url.as_str()).unwrap();
-        }
-        Action::None => {}
-    };
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+    run().await
 }
 
 async fn run() -> Result<()> {
-    let (action_tx, mut action_rx) = mpsc::unbounded_channel(); // new
+    let local_offset = domain::local_offset();
+    let today = time::OffsetDateTime::now_utc()
+        .to_offset(local_offset)
+        .date();
+    let config = config::Config::load(today)?;
+    let client = canvas::CanvasClient::new(config.canvas_url.clone(), config.access_token.clone());
 
-    {
-        let action_tx = action_tx.clone();
-        tokio::spawn(async move {
-            let cached_body_bytes = match tokio::fs::read(CACHE_FILE).await {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return;
-                }
-            };
-            let calendar: Calendar = serde_json::from_slice(&cached_body_bytes).unwrap();
-            action_tx.send(Action::FileFetchComplete(calendar)).unwrap();
-        });
+    let cached_snapshot = cache::load(&config.cache_path).wrap_err("failed to load cache")?;
+    let initial_snapshot = cached_snapshot.unwrap_or_else(|| {
+        AgendaSnapshot::empty(config.initial_range, time::OffsetDateTime::now_utc())
+    });
+    let mut app = App::new(config.clone(), initial_snapshot, today);
+    if app.snapshot.days.is_empty() {
+        app.set_status("Loading Canvas planner items...", false);
+    } else {
+        app.set_status("Loaded cached planner snapshot; refreshing...", false);
     }
-    {
-        let mut action_tx = action_tx.clone();
-        tokio::spawn(async move {
-            fetch(&mut action_tx).await.unwrap();
-        });
-    }
+
+    let (fetch_tx, mut fetch_rx): (UnboundedSender<FetchResult>, UnboundedReceiver<FetchResult>) =
+        mpsc::unbounded_channel();
+    let initial_request = app.refresh_request();
+    request_fetch(&client, &mut app, fetch_tx.clone(), initial_request);
 
     let mut tui = tui::Tui::new()?;
     tui.enter()?;
 
-    let mut app = App {
-        should_quit: false,
-        action_tx: action_tx.clone(),
-        longest_item_lens: (0, 0, 0),
-        received_fetch: false,
-        current_date_index: 0,
-        calendar: Calendar { dates: vec![] },
-    };
-
     loop {
-        let e = tui.next().await?;
-        match e {
-            tui::Event::Tick => action_tx.send(Action::Tick)?,
-            tui::Event::Render => action_tx.send(Action::Render)?,
-            tui::Event::Key(_) => {
-                let action = get_action(&app, e);
-                action_tx.send(action.clone())?;
+        tokio::select! {
+            event = tui.next() => {
+                match event? {
+                    tui::Event::Render => {
+                        tui.draw(|frame| ui::draw(frame, &app))?;
+                    }
+                    tui::Event::Key(key) => handle_key(&client, &mut app, &fetch_tx, today, key),
+                    tui::Event::Error => app.set_status("Terminal input error", true),
+                    tui::Event::Tick => {}
+                }
             }
-            _ => {}
-        };
-
-        while let Ok(action) = action_rx.try_recv() {
-            update(&mut app, action.clone());
-            if let Action::Render = action {
-                tui.draw(|f| {
-                    ui(f, &mut app);
-                })?;
+            Some(fetch_result) = fetch_rx.recv() => {
+                handle_fetch_result(&mut app, today, fetch_result)?;
             }
         }
 
@@ -361,17 +71,107 @@ async fn run() -> Result<()> {
             break;
         }
     }
-    tui.exit()?;
 
+    tui.exit()?;
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    color_eyre::install()?;
-    let result = run().await;
+fn handle_key(
+    client: &canvas::CanvasClient,
+    app: &mut App,
+    fetch_tx: &UnboundedSender<FetchResult>,
+    today: time::Date,
+    key: crossterm::event::KeyEvent,
+) {
+    match key.code {
+        KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('j') => app.next_item(),
+        KeyCode::Char('k') => app.previous_item(),
+        KeyCode::Char('h') => {
+            if !app.previous_day()
+                && let Some(request) = app.previous_day_request()
+            {
+                request_fetch(client, app, fetch_tx.clone(), request);
+            }
+        }
+        KeyCode::Char('l') => {
+            if !app.next_day()
+                && let Some(request) = app.next_day_request()
+            {
+                request_fetch(client, app, fetch_tx.clone(), request);
+            }
+        }
+        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::SHIFT) => app.last_day(),
+        KeyCode::Char('g') => app.first_day(),
+        KeyCode::Char('0') => app.jump_to_default_day(),
+        KeyCode::Char('r') => request_fetch(client, app, fetch_tx.clone(), app.refresh_request()),
+        KeyCode::Char('o') => {
+            if let Some(url) = app.current_item().and_then(|item| item.html_url.as_ref()) {
+                match webbrowser::open(url) {
+                    Ok(_) => app.set_status(format!("Opened {url}"), false),
+                    Err(error) => app.set_status(format!("Failed to open URL: {error}"), true),
+                }
+            } else {
+                app.set_status("Selected item does not provide an openable URL", true);
+            }
+        }
+        _ => {}
+    }
 
-    result?;
+    let _ = today;
+}
 
+fn request_fetch(
+    client: &canvas::CanvasClient,
+    app: &mut App,
+    fetch_tx: UnboundedSender<FetchResult>,
+    request: FetchRequest,
+) {
+    if app.is_fetch_in_flight(&request) {
+        return;
+    }
+    app.mark_fetch_started(request.clone());
+    let client = client.clone();
+    tokio::spawn(async move {
+        let result = client.fetch_snapshot(request.range).await;
+        let _ = fetch_tx.send(FetchResult { request, result });
+    });
+}
+
+fn handle_fetch_result(app: &mut App, today: time::Date, fetch_result: FetchResult) -> Result<()> {
+    let selected_key = app.selected_item_key();
+    app.mark_fetch_finished(&fetch_result.request);
+    match fetch_result.result {
+        Ok(snapshot) => {
+            let fetched_at = snapshot.fetched_at;
+            app.apply_snapshot_update(snapshot, today, selected_key);
+            cache::store(&app.config.cache_path, &app.snapshot)
+                .wrap_err("failed to store cache")?;
+            match fetch_result.request.reason {
+                FetchReason::Refresh => app.set_status(
+                    format!(
+                        "Planner refreshed at {}",
+                        fetched_at.format(&time::format_description::parse("[hour]:[minute]")?)?
+                    ),
+                    false,
+                ),
+                FetchReason::Older => {
+                    if app.selected_day > 0 {
+                        app.previous_day();
+                    }
+                    app.set_status("Loaded older planner items", false);
+                }
+                FetchReason::Newer => {
+                    if app.selected_day + 1 < app.snapshot.days.len() {
+                        app.next_day();
+                    }
+                    app.set_status("Loaded newer planner items", false);
+                }
+            }
+        }
+        Err(error) => {
+            app.set_status(format!("{}: {error}", fetch_result.request.reason), true);
+        }
+    }
     Ok(())
 }
